@@ -8,6 +8,12 @@ volatile int counter = 0;
 std::mutex counter_mutex;
 std::condition_variable cv;
 
+/**
+ * @brief Increment the counter in ascending order of the id by using a
+ * condition variable to wait for its turn.
+ *
+ * @param id
+ */
 void increment(int id) {
   std::unique_lock lk(counter_mutex);
   // wait until thread's turn
