@@ -9,3 +9,4 @@ set(THREADS_PREFER_PTHREAD_FLAG TRUE)
 find_package(Threads REQUIRED)
 
 add_executable(lock_guard lock_guard.cc)
+target_link_libraries(lock_guard PRIVATE Threads::Threads)
