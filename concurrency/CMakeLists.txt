@@ -11,5 +11,8 @@ find_package(Threads REQUIRED)
 add_executable(lock_guard lock_guard.cc)
 target_link_libraries(lock_guard PRIVATE Threads::Threads)
 
+add_executable(unique_lock unique_lock.cc)
+target_link_libraries(unique_lock PRIVATE Threads::Threads)
+
 add_executable(condition_variable condition_variable.cc)
 target_link_libraries(condition_variable PRIVATE Threads::Threads)
