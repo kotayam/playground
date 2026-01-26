@@ -22,6 +22,7 @@ Optimize for space (do not copy the entire HashMap for every snapshot).
 Optimize for fast reads.
 */
 
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -33,6 +34,9 @@ class SnapshotMap {
   };
   std::unordered_map<std::string, std::vector<Entry>> db_;
   int curr_snap_id_;
+  // mutable allows a member variable to be modified even inside a function that
+  // is marked const (get() function in this case).
+  mutable std::mutex mtx;
 
 public:
   SnapshotMap() {
@@ -41,13 +45,14 @@ public:
   }
 
   void put(const std::string &key, const std::string &value) {
+    std::lock_guard<std::mutex> lock(mtx);
     if (db_.find(key) == db_.end()) {
       // insert new vec
       std::vector<Entry> vec = {{curr_snap_id_, value}};
       db_.insert({key, vec});
       return;
     }
-    std::vector<Entry> &hist = db_[key];
+    std::vector<Entry> &hist = db_.at(key);
     if (hist.back().snap_id == curr_snap_id_) {
       hist.back().value = value;
     } else {
@@ -56,17 +61,21 @@ public:
   }
 
   int takeSnapshot() {
+    std::lock_guard<std::mutex> lock(mtx);
     int id = curr_snap_id_;
     curr_snap_id_++;
     return id;
   }
 
-  std::string get(const std::string &key, int snap_id) {
+  // we mark this function as const because we should allow const objects to
+  // call this function.
+  std::string get(const std::string &key, int snap_id) const {
+    std::lock_guard<std::mutex> lock(mtx);
     if (db_.find(key) == db_.end()) {
       return "";
     }
     // binary search the entry with snap_id
-    const std::vector<Entry> &hist = db_[key];
+    const std::vector<Entry> &hist = db_.at(key);
     int l = 0;
     int r = hist.size();
     int m = (r - l) / 2 + l;
