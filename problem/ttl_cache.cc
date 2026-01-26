@@ -19,7 +19,15 @@ How do you handle cleanup efficiently without blocking the put and get
 operations?
 */
 
+/*
+Answer: Maintain a priority queue (min heap) to store expiry times (associated
+with id), and spawn a thread that checks the queue and cleans up if time.
+*/
+
+#include <chrono>
+#include <condition_variable>
 #include <mutex>
+#include <queue>
 #include <string>
 #include <thread>
 #include <unistd.h>
@@ -27,59 +35,96 @@ operations?
 #include <vector>
 
 class TTLCache {
-  std::unordered_map<std::string, std::string> cache_;
-  std::vector<std::thread> threads_;
-  std::thread bg_;
-  std::mutex mtx;
 
-  void cleanupWorker(const std::string &key, int duration) {
-    sleep(duration);
-    std::lock_guard<std::mutex> lock(mtx);
-    cache_.erase(key);
+  struct CacheEntry {
+    std::string value;
+    std::chrono::steady_clock::time_point expiry;
+  };
+
+  struct QueueEntry {
+    std::string key;
+    std::chrono::steady_clock::time_point expiry;
+  };
+
+  // Use for declaring a comparator for QueueEntry so that it compares based on
+  // the expiry field in the priority queue.
+  struct CompareEntry {
+    bool operator()(const QueueEntry &a, const QueueEntry &b) {
+      return a.expiry > b.expiry;
+    }
+  };
+
+  std::unordered_map<std::string, CacheEntry> cache_;
+  std::priority_queue<QueueEntry, std::vector<QueueEntry>, CompareEntry>
+      expiryQueue_;
+  std::thread bg_;
+  mutable std::mutex mtx_;
+  std::condition_variable cv_;
+  bool end_;
+
+  std::chrono::steady_clock::time_point getCurrentTime() {
+    return std::chrono::steady_clock::now();
   }
 
-  void joinThreads(int joinInterval) {
-    while (true) {
-      sleep(joinInterval);
-      std::unique_lock<std::mutex> lck(mtx);
-      for (auto &t : threads_) {
-        if (t.joinable()) {
-          t.join();
-        }
+  void cleanupWorker() {
+    std::unique_lock<std::mutex> lock(mtx_);
+    while (!end_) {
+      if (expiryQueue_.empty()) {
+        // nothing to do for now so wait until notified
+        cv_.wait(lock, [this] { return end_; });
       }
-      lck.unlock();
+      std::chrono::steady_clock::time_point curr = getCurrentTime();
+      QueueEntry nextExpiry = expiryQueue_.top();
+      if (nextExpiry.expiry > curr) {
+        // wait until next expiry time
+        cv_.wait_until(lock, nextExpiry.expiry);
+      } else {
+        // remove earliest
+        cache_.erase(nextExpiry.key);
+        expiryQueue_.pop();
+      }
     }
   }
 
 public:
-  TTLCache(int joinInterval) {
+  TTLCache() {
     cache_ = {};
-    threads_ = {};
-    // join threads every interval as background job
-    bg_ = std::thread(&TTLCache::joinThreads, this, joinInterval);
+    end_ = false;
+    bg_ = std::thread(&TTLCache::cleanupWorker, this);
   }
 
   ~TTLCache() {
     // join background thread
+    end_ = true;
+    cv_.notify_all();
     if (bg_.joinable()) {
       bg_.join();
     }
   }
 
-  void put(const std::string &key, const std::string &value, int duration) {
-    std::lock_guard<std::mutex> lock(mtx);
-    cache_.insert(key, value);
-    threads_.emplace_back(
-        std::thread(&TTLCache::cleanupWorker, this, value, duration));
+  void put(const std::string &key, const std::string &value, int duration_sec) {
+    std::unique_lock<std::mutex> lock(mtx_);
+    std::chrono::steady_clock::time_point expiry =
+        getCurrentTime() + std::chrono::milliseconds(duration_sec * 1000);
+    cache_[key] = {value, expiry};
+    expiryQueue_.push({key, expiry});
+    lock.unlock();
+    // run (unblock) cleanup worker
+    cv_.notify_one();
   }
 
-  std::string *get(const std::string &key) {
-    std::lock_guard<std::mutex> lock(mtx);
+  std::string get(const std::string &key) const {
+    std::lock_guard<std::mutex> lock(mtx_);
     auto it = cache_.find(key);
 
     if (it == cache_.end()) {
-      return nullptr;
+      return "";
     }
-    return &it->second;
+    return it->second.value;
   }
 };
+
+int main() {
+  TTLCache cache;
+  return 0;
+}
