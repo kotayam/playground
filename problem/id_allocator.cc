@@ -20,6 +20,7 @@ Must be thread-safe.
 The system handles millions of IDs (space efficiency matters).
 */
 
+#include <iostream>
 #include <mutex>
 #include <vector>
 
@@ -106,3 +107,18 @@ public:
     return tree_[i];
   }
 };
+
+int main() {
+  IDAllocator allocator(100);
+  std::cout << "Allocated: " << allocator.allocate() << "\n"; // 0
+  std::cout << "Allocated: " << allocator.allocate() << "\n"; // 1
+  std::cout << "Allocated: " << allocator.allocate() << "\n"; // 2
+  std::cout << "Allocated: " << allocator.allocate() << "\n"; // 3
+  std::cout << "Allocated: " << allocator.allocate() << "\n"; // -1 (Full)
+
+  std::cout << "Releasing 1...\n";
+  allocator.release(1);
+
+  std::cout << "Allocated: " << allocator.allocate() << "\n"; // Should reuse 1
+  return 0;
+}

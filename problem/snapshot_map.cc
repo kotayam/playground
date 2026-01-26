@@ -93,3 +93,8 @@ public:
     return "";
   }
 };
+
+int main() {
+  SnapshotMap sm;
+  return 0;
+}
